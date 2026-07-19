@@ -81,7 +81,10 @@ Then **measure, don't assume** — see [TESTING.md](TESTING.md) and `scripts/ben
 4. **Measure prefill and generation separately, warmup-corrected.** A change can help one and
    wreck the other (e.g. flash-attention on CPU tanked our prefill 14×).
 
-See [FINDINGS.md](FINDINGS.md) for the full lever-by-lever detail and the Intel-specific notes.
+See [FINDINGS.md](FINDINGS.md) for the full lever-by-lever detail and the Intel-specific notes,
+and [research/gated-deltanet-prefill-caching.md](research/gated-deltanet-prefill-caching.md) for a
+deep dive on *why you re-prefill every turn* on Gated DeltaNet (Qwen3-Next) hybrids and what actually
+fixes it (checkpointing, stable-prefix compaction, engine choice).
 
 ---
 *These are field notes from one box, shared in case they save someone else the week we spent.
