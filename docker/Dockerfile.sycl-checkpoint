@@ -1,20 +1,24 @@
-# llama.cpp SYCL build for Intel Arc + Gated DeltaNet hybrid MoE, WITH working checkpoint reuse.
+# llama.cpp SYCL build for Intel Arc + Gated DeltaNet hybrid MoE, with working checkpoint reuse.
+# This is the DEPLOYED, correct configuration on Arc B580 (Battlemage-G21). See:
+#   ../research/b580-checkpoint-reuse-results.md
 #
 # vs a stock/older build this gets you:
 #   - Hybrid CONTEXT-CHECKPOINT reuse (llama.cpp fixes #22384 / #22929) — recurrent-state models
 #     (Qwen3-Next / Qwen3.5 / Qwen3.6 Gated DeltaNet) resume from the nearest checkpoint instead of
-#     re-prefilling the whole context every turn.
-#   - oneDNN linked in (intel-oneapi-dnnl) + GGML_SYCL_DNN=ON.
+#     re-prefilling the whole context every turn. Turn-2 recompute is a CONSTANT ~4K tokens regardless
+#     of context size (measured identical at 6K and 15K) => ~12x at 50K, ~24x at 100K.
 #   - GGML_SYCL_F16.
 #
-# WARNING (validated on Arc B580 / Battlemage-G21, 2026-07) — CORRECTNESS, read this:
-#   Recent master (commit 571d0d5) gives working checkpoint reuse + ~50% faster prefill, BUT it
-#   produced GIBBERISH on Qwen3.6-35B-A3B Q4_K for REAL/LONGER requests (upstream #25708) — while
-#   SHORT test prompts looked fine (false green light). The `-fa on` oneDNN flash-attention path
-#   (PR #25222) was even worse (gibberish immediately + xe faults). We ROLLED BACK to an older build.
-#   => Validate correctness with REAL long/agentic prompts before deploying ANY recent build here,
-#      not toy prompts. The checkpoint-reuse win is gated behind the #25708 fix on Battlemage-Q4_K.
-#      Try a different quant (bf16?) or wait for the upstream fix. Your card/quant may differ.
+# THE KEY LESSON (Arc B580 / Battlemage-G21, validated 2026-07) — CORRECTNESS:
+#   Do NOT enable oneDNN on this card. An earlier build with -DGGML_SYCL_DNN=ON produced GIBBERISH on
+#   Qwen3.6-35B-A3B Q4_K for real/longer requests, even though it already contained the upstream fix
+#   for the quant-kernel bug (PR #25690, which fixed #25708-class corruption in the native dmmv path).
+#   The reason: oneDNN routes matmul through a SEPARATE DnnlGemmWrapper GEMM path that #25690 never
+#   touched, and that path is broken on G21 (the same oneDNN also corrupts the -fa flash-attention
+#   path here). Dropping oneDNN uses the native SYCL kernels, which are correct AND fast.
+#   => Build WITHOUT oneDNN (below). Validate correctness with REAL long/multi-turn prompts, not toy
+#      prompts (short prompts dodge the bug). Your card/quant may differ — B70 (G31) was fine even with
+#      the older path once #25690 landed; G21 needs oneDNN off.
 #
 # Tune the versions/PPA to your distro; this is the exact combo used on the reference box
 # (ubuntu:25.10 + oneAPI 2025.2 + Intel "kobuk" graphics PPA for Battlemage-correct NEO).
@@ -31,17 +35,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && add-apt-repository -y ppa:kobuk-team/intel-graphics \
     && apt-get update && apt-get install -y --no-install-recommends \
       intel-oneapi-compiler-dpcpp-cpp-2025.2 intel-oneapi-mkl-devel-2025.2 \
-      intel-oneapi-dnnl-devel-2025.2 \
       libze-intel-gpu1 libze1 intel-opencl-icd \
     && rm -rf /var/lib/apt/lists/*
-RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp /ll \
+# Pin to a commit that contains PR #25690 (the #25708 quant-kernel fix, merged 2026-07-17).
+RUN git clone https://github.com/ggml-org/llama.cpp /ll \
+    && git -C /ll checkout 571d0d540df04f25298d0e159e520d9fc62ed121 \
     && git -C /ll log -1 --oneline > /ll_commit.txt && cat /ll_commit.txt
 WORKDIR /ll
-RUN bash -c 'source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1; \
+# NOTE: NO -DGGML_SYCL_DNN. oneDNN is deliberately omitted (see header). GGML_SYCL_F16 only.
+RUN bash -c "source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1; \
     cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-      -DGGML_SYCL=ON -DGGML_SYCL_F16=ON -DGGML_SYCL_DNN=ON \
+      -DGGML_SYCL=ON -DGGML_SYCL_F16=ON \
       -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icpx -DLLAMA_CURL=OFF \
-    && cmake --build build -j10 --target llama-bench llama-server' \
+    && cmake --build build -j10 --target llama-bench llama-server llama-cli" \
  && ls build/bin/
 ENV ONEAPI_DEVICE_SELECTOR=level_zero:gpu
 ENTRYPOINT ["bash","-lc","source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1; exec \"$@\"","--"]

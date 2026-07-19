@@ -84,9 +84,12 @@ Then **measure, don't assume** — see [TESTING.md](TESTING.md) and `scripts/ben
 See [FINDINGS.md](FINDINGS.md) for the full lever-by-lever detail and the Intel-specific notes,
 and [research/gated-deltanet-prefill-caching.md](research/gated-deltanet-prefill-caching.md) for a
 deep dive on *why you re-prefill every turn* on Gated DeltaNet (Qwen3-Next) hybrids and what actually
-fixes it (checkpointing, stable-prefix compaction, engine choice). A newer llama.cpp build *does* ship
-the checkpoint-reuse fix — but on Battlemage-Q4_K it currently gibberishes (upstream #25708), so it's
-not deployable yet: see [research/b580-checkpoint-reuse-results.md](research/b580-checkpoint-reuse-results.md)
+fixes it (checkpointing, stable-prefix compaction, engine choice). **This now works and is deployed on
+the B580.** The checkpoint-reuse build initially gibberished (upstream #25708), but the root cause was
+**oneDNN** (`-DGGML_SYCL_DNN=ON`), which is broken on the Arc B580 — the actual quant-kernel bug was
+fixed upstream in PR #25690. Building **without oneDNN** gives correct output *and* the checkpoint-reuse
+win: turn-2 recompute is a constant ~4K tokens regardless of context size (~12× at 50K, ~24× at 100K).
+See [research/b580-checkpoint-reuse-results.md](research/b580-checkpoint-reuse-results.md)
 and [docker/Dockerfile.sycl-checkpoint](docker/Dockerfile.sycl-checkpoint).
 
 ---
