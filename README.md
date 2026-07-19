@@ -84,7 +84,10 @@ Then **measure, don't assume** — see [TESTING.md](TESTING.md) and `scripts/ben
 See [FINDINGS.md](FINDINGS.md) for the full lever-by-lever detail and the Intel-specific notes,
 and [research/gated-deltanet-prefill-caching.md](research/gated-deltanet-prefill-caching.md) for a
 deep dive on *why you re-prefill every turn* on Gated DeltaNet (Qwen3-Next) hybrids and what actually
-fixes it (checkpointing, stable-prefix compaction, engine choice).
+fixes it (checkpointing, stable-prefix compaction, engine choice). A newer llama.cpp build *does* ship
+the checkpoint-reuse fix — but on Battlemage-Q4_K it currently gibberishes (upstream #25708), so it's
+not deployable yet: see [research/b580-checkpoint-reuse-results.md](research/b580-checkpoint-reuse-results.md)
+and [docker/Dockerfile.sycl-checkpoint](docker/Dockerfile.sycl-checkpoint).
 
 ---
 *These are field notes from one box, shared in case they save someone else the week we spent.

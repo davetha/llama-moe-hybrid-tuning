@@ -1,0 +1,47 @@
+# llama.cpp SYCL build for Intel Arc + Gated DeltaNet hybrid MoE, WITH working checkpoint reuse.
+#
+# vs a stock/older build this gets you:
+#   - Hybrid CONTEXT-CHECKPOINT reuse (llama.cpp fixes #22384 / #22929) — recurrent-state models
+#     (Qwen3-Next / Qwen3.5 / Qwen3.6 Gated DeltaNet) resume from the nearest checkpoint instead of
+#     re-prefilling the whole context every turn.
+#   - oneDNN linked in (intel-oneapi-dnnl) + GGML_SYCL_DNN=ON.
+#   - GGML_SYCL_F16.
+#
+# WARNING (validated on Arc B580 / Battlemage-G21, 2026-07) — CORRECTNESS, read this:
+#   Recent master (commit 571d0d5) gives working checkpoint reuse + ~50% faster prefill, BUT it
+#   produced GIBBERISH on Qwen3.6-35B-A3B Q4_K for REAL/LONGER requests (upstream #25708) — while
+#   SHORT test prompts looked fine (false green light). The `-fa on` oneDNN flash-attention path
+#   (PR #25222) was even worse (gibberish immediately + xe faults). We ROLLED BACK to an older build.
+#   => Validate correctness with REAL long/agentic prompts before deploying ANY recent build here,
+#      not toy prompts. The checkpoint-reuse win is gated behind the #25708 fix on Battlemage-Q4_K.
+#      Try a different quant (bf16?) or wait for the upstream fix. Your card/quant may differ.
+#
+# Tune the versions/PPA to your distro; this is the exact combo used on the reference box
+# (ubuntu:25.10 + oneAPI 2025.2 + Intel "kobuk" graphics PPA for Battlemage-correct NEO).
+
+FROM ubuntu:25.10
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      wget gpg ca-certificates software-properties-common gpg-agent \
+      build-essential cmake ninja-build git \
+    && wget -qO- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+       | gpg --dearmor -o /usr/share/keyrings/oneapi.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/oneapi.gpg] https://apt.repos.intel.com/oneapi all main" \
+       > /etc/apt/sources.list.d/oneapi.list \
+    && add-apt-repository -y ppa:kobuk-team/intel-graphics \
+    && apt-get update && apt-get install -y --no-install-recommends \
+      intel-oneapi-compiler-dpcpp-cpp-2025.2 intel-oneapi-mkl-devel-2025.2 \
+      intel-oneapi-dnnl-devel-2025.2 \
+      libze-intel-gpu1 libze1 intel-opencl-icd \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp /ll \
+    && git -C /ll log -1 --oneline > /ll_commit.txt && cat /ll_commit.txt
+WORKDIR /ll
+RUN bash -c 'source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1; \
+    cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DGGML_SYCL=ON -DGGML_SYCL_F16=ON -DGGML_SYCL_DNN=ON \
+      -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icpx -DLLAMA_CURL=OFF \
+    && cmake --build build -j10 --target llama-bench llama-server' \
+ && ls build/bin/
+ENV ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+ENTRYPOINT ["bash","-lc","source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1; exec \"$@\"","--"]
