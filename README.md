@@ -27,6 +27,8 @@ Generation stayed ~38 t/s throughout — it's memory-bandwidth-bound on the CPU 
 already near its ceiling. **The whole win is prefill**, which is what dominates large-context
 (agentic / long-doc) workloads.
 
+Full numbers (llama-bench sweep + live-server validation) in [BENCHMARKS.md](BENCHMARKS.md).
+
 ## What generalizes to which hardware
 
 | Finding | AMD (ROCm/Vulkan) | NVIDIA (CUDA) | Intel (SYCL) | Why |
